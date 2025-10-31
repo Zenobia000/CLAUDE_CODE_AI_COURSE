@@ -29,7 +29,7 @@ AI_Programming_15h_Course_v2.0/
 ├── 03-12 模組/                   # Modules 3-12: IDE, TDD/BDD, CI/CD, etc.
 ├── 補充資源/                     # Supplementary Resources
 │   ├── 情境題庫總覽/             # 300+ scenario problems (Level 1/2/3)
-│   ├── Anki記憶卡總庫/           # 500+ Anki flashcards
+│   ├── 學習資源總庫/             # Comprehensive learning resources
 │   └── 範例專案庫/               # Sample projects
 └── 講師專區/                     # Instructor Zone
     └── 1.1_課程設計與規劃/       # Course Design & Planning
@@ -77,7 +77,7 @@ Follow the Conventional Commits format defined in `~/.claude/CLAUDE.md`:
 - `docs(design)`: Design documentation
 - `docs(wbs)`: WBS updates
 - `feat(scenarios)`: Scenario problems
-- `feat(flashcards)`: Anki flashcards
+- `feat(learning-resources)`: Learning resource materials
 - `fix(structure)`: File structure corrections
 - `refactor(content)`: Content reorganization
 
@@ -105,9 +105,9 @@ Course problems are structured in three difficulty levels:
 Core pedagogical approach (see `講師專區/1.1_課程設計與規劃/1.1.1_學習理論設計/`):
 
 1. **Cognitive Science Based**
-   - Spaced repetition (Anki flashcards)
    - Active recall through scenarios
    - Elaborative interrogation
+   - Progressive difficulty building
 
 2. **Linux Learning Analogy**
    - Learn by doing, not memorizing
@@ -129,7 +129,7 @@ XX_ModuleName/
 ├── 理論/                  # Theory & concepts
 ├── 情境題庫/              # Scenario problems (Level 1/2/3)
 ├── 實作/                  # Hands-on exercises
-├── 記憶卡庫/              # Anki flashcards
+├── 學習資源/              # Learning resources
 └── 作業/                  # Assignments
 ```
 
@@ -142,29 +142,29 @@ When developing new module content:
 1. **Check WBS task list**: Verify what's needed in `WBS_工作分解結構.md`
 2. **Follow module structure**: Use the pattern above
 3. **Write scenarios first**: Start with real-world problems, derive commands naturally
-4. **Create flashcards**: Write situation-based flashcards, NOT definition-based
+4. **Create learning resources**: Write situation-based materials focusing on problem-solving patterns
 5. **Update WBS**: Mark completed items and add progress records
 
-### Flashcard Design Philosophy
+### Learning Resource Design Philosophy
 
 **WRONG ❌**:
 ```
-Q: What does /agents command do?
-A: Manages AI agents
+Command Reference: /agents - Manages AI agents
 ```
 
 **RIGHT ✅**:
 ```
-Q: 【Scenario】You need deep security audit covering SQL injection,
-   XSS, permissions. What's your approach?
+【Scenario】You need deep security audit covering SQL injection,
+XSS, permissions. What's your approach?
 
-A: 【Solution】
-   1. Switch to expert mode: /agents:security-auditor
-   2. Run comprehensive scan: claude /security-review ./src
-   3. Generate report: /output-style:security-report
-   4. Log learnings: /memory
+【Solution Pattern】
+1. Switch to expert mode: /agents:security-auditor
+2. Run comprehensive scan: claude /security-review ./src
+3. Generate report: /output-style:security-report
+4. Log learnings: /memory
 
-   【Memory Point】Need professional analysis → Switch to corresponding agent
+【Key Learning】Need professional analysis → Switch to corresponding agent
+【When to Use】Complex domain-specific tasks requiring specialized knowledge
 ```
 
 ### Scenario Problem Design
@@ -184,7 +184,7 @@ Example structure in `補充資源/情境題庫總覽/情境設計模板.md`
 
 ### File Naming
 
-- Use descriptive Chinese names for directories: `情境題庫/`, `記憶卡庫/`
+- Use descriptive Chinese names for directories: `情境題庫/`, `學習資源/`
 - Use numbered prefixes for modules: `00_`, `01_`, `02_`, etc.
 - Markdown files use `.md` extension
 - README.md in every major directory
@@ -249,7 +249,7 @@ git push origin main
 2. **✅ Logical Units of Work**
    - One complete document (e.g., `2.1_Claude_Code安裝與配置.md`)
    - One complete scenario problem with solution
-   - One set of related flashcards (e.g., all flashcards for Module 2)
+   - One set of related learning resources (e.g., all resources for Module 2)
    - One README.md with complete module overview
 
 3. **✅ Milestone Completions**
@@ -405,8 +405,8 @@ git commit -m "feat(module-X): add all theory documents"
 git add 情境題庫/**/*.md
 git commit -m "feat(scenarios): add complete scenario bank for Module X"
 
-git add 記憶卡庫/*.md
-git commit -m "feat(flashcards): add Anki flashcard set for Module X"
+git add 學習資源/*.md
+git commit -m "feat(learning-resources): add comprehensive learning materials for Module X"
 
 # Then update WBS once
 git add WBS_工作分解結構.md
@@ -477,7 +477,7 @@ Before marking WBS items complete:
 
 - [ ] Content is complete and accurate
 - [ ] Examples are tested
-- [ ] Flashcards are created (if applicable)
+- [ ] Learning resources are prepared (if applicable)
 - [ ] Scenarios are designed (if applicable)
 - [ ] README.md is updated
 - [ ] WBS is updated with progress
@@ -505,7 +505,7 @@ rg "\[ \]" AI_Programming_15h_Course_v2.0/WBS_工作分解結構.md
 cd AI_Programming_15h_Course_v2.0/XX_ModuleName/
 
 # Create standard structure (if needed)
-mkdir -p 理論 情境題庫/{基礎級,組合級,複雜級} 實作 記憶卡庫 作業
+mkdir -p 理論 情境題庫/{基礎級,組合級,複雜級} 實作 學習資源 作業
 
 # Start writing content
 # Use Read/Write/Edit tools for file operations
@@ -517,7 +517,7 @@ mkdir -p 理論 情境題庫/{基礎級,組合級,複雜級} 實作 記憶卡庫
 
 - [ ] Complete 13 core modules (52 hours content)
 - [ ] Build 300+ scenario problem bank
-- [ ] Create 500+ Anki flashcards
+- [ ] Create comprehensive learning resources
 - [ ] Develop 10+ sample projects
 - [ ] Establish complete assessment system
 
@@ -531,7 +531,7 @@ mkdir -p 理論 情境題庫/{基礎級,組合級,複雜級} 實作 記憶卡庫
 2. **Milestone 2** (Week 10): Core Content Complete
    - Modules 0-2.5 content finished
    - Basic scenario bank complete
-   - Flashcard system prototype ready
+   - Learning resource system ready
 
 3. **Milestone 3** (Week 14): Practical Projects Complete
    - Sample project library finished
@@ -550,7 +550,7 @@ mkdir -p 理論 情境題庫/{基礎級,組合級,複雜級} 實作 記憶卡庫
 - Focus on **scenario-driven** approach, not command-listing
 - Each concept should emerge from solving a real problem
 - Include "自然學到的指令" (naturally learned commands) in scenarios
-- Write flashcards that test problem-solving, not definitions
+- Create learning resources that reinforce problem-solving patterns, not definitions
 
 ### When Updating WBS
 
