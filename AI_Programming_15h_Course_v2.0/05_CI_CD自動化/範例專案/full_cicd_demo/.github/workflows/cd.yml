@@ -1,0 +1,95 @@
+name: CD Pipeline
+
+on:
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types: [completed]
+    branches: [main, develop]
+
+jobs:
+  deploy-dev:
+    name: Deploy to Development
+    runs-on: ubuntu-latest
+    if: |
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'develop'
+    environment:
+      name: development
+      url: https://dev.example.com
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy notification
+        run: |
+          echo "Deploying to development environment"
+          echo "Image: ghcr.io/${{ github.repository }}:develop-${{ github.sha }}"
+
+      # 實際部署步驟（範例）
+      # - name: Deploy via SSH
+      #   uses: appleboy/ssh-action@master
+      #   with:
+      #     host: ${{ secrets.DEV_HOST }}
+      #     username: ${{ secrets.DEV_USER }}
+      #     key: ${{ secrets.SSH_PRIVATE_KEY }}
+      #     script: |
+      #       cd /app/deployment/dev
+      #       docker-compose pull
+      #       docker-compose up -d
+
+      - name: Health check
+        run: |
+          echo "Running health check..."
+          # curl -f https://dev.example.com/health
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    if: |
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    environment:
+      name: staging
+      url: https://staging.example.com
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy notification
+        run: |
+          echo "Deploying to staging environment"
+          echo "Image: ghcr.io/${{ github.repository }}:main-${{ github.sha }}"
+
+      - name: Health check
+        run: |
+          echo "Running health check..."
+          # curl -f https://staging.example.com/health
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    environment:
+      name: production
+      url: https://app.example.com
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy notification
+        run: |
+          echo "Deploying to production environment"
+          echo "Image: ghcr.io/${{ github.repository }}:main-${{ github.sha }}"
+
+      # 實際部署使用藍綠部署
+      # 請參考完整範本：範例配置/workflow_templates/full-pipeline.yml
+
+      - name: Health check
+        run: |
+          echo "Running health check..."
+          # curl -f https://app.example.com/health
+
+      - name: Success notification
+        if: success()
+        run: |
+          echo "✅ Production deployment successful!"

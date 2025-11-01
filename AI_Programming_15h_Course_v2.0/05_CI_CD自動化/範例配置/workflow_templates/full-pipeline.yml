@@ -1,0 +1,547 @@
+# 完整 CI/CD 管線範本
+#
+# 用途：涵蓋測試、安全掃描、構建、部署的完整端到端管線
+# 適用場景：生產級專案的完整 DevOps 流程
+#
+# 特色功能：
+# - 並行執行（優化速度）
+# - 多層次安全掃描
+# - 多環境部署
+# - 自動化測試與驗證
+# - 監控與通知
+# - 自動回退機制
+
+name: Full CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # 每週一凌晨 2 點執行（定時安全掃描）
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Stage 1: 程式碼品質檢查（並行執行）
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  lint:
+    name: Code Quality - Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install linting tools
+        run: pip install black flake8 isort mypy
+
+      - name: Run black
+        run: black --check .
+
+      - name: Run flake8
+        run: flake8 . --max-line-length=100 --extend-ignore=E203,W503
+
+      - name: Run isort
+        run: isort --check .
+
+      - name: Run mypy (type checking)
+        run: mypy . --ignore-missing-imports
+        continue-on-error: true  # Type checking 失敗不阻止流程
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio
+
+      - name: Run unit tests
+        run: pytest tests/unit/ -v --cov=app --cov-report=xml
+
+      - name: Run integration tests
+        run: pytest tests/integration/ -v
+        env:
+          DATABASE_URL: sqlite:///./test.db
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        if: matrix.python-version == '3.11'
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Stage 2: 安全掃描（並行執行）
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  security-codeql:
+    name: Security - CodeQL Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:python"
+
+  security-dependencies:
+    name: Security - Dependency Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Snyk to check for vulnerabilities
+        uses: snyk/actions/python@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high --sarif-file-output=snyk.sarif
+
+      - name: Upload Snyk results to GitHub
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: snyk.sarif
+
+      - name: Run Safety check
+        run: |
+          pip install safety
+          safety check --file requirements.txt --output text
+
+  security-secrets:
+    name: Security - Secret Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 掃描所有歷史
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Stage 3: Docker 構建與掃描
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [lint, test, security-codeql, security-dependencies, security-secrets]
+    if: github.event_name != 'pull_request'
+
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-tags: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix={{branch}}-,format=short
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+  container-scan:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Trivy scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}-${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Stage 4: 部署到各環境
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  deploy-dev:
+    name: Deploy to Development
+    runs-on: ubuntu-latest
+    needs: [build, container-scan]
+    if: github.ref == 'refs/heads/develop'
+    environment:
+      name: development
+      url: https://dev.example.com
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to dev environment
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEV_HOST }}
+          username: ${{ secrets.DEV_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /app
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:develop-${{ github.sha }}
+            docker-compose down
+            IMAGE_TAG=develop-${{ github.sha }} docker-compose up -d
+
+      - name: Wait for application
+        run: sleep 30
+
+      - name: Health check
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://dev.example.com/health)
+          if [ "$response" != "200" ]; then
+            echo "Health check failed (HTTP $response)"
+            exit 1
+          fi
+
+      - name: Run smoke tests
+        run: |
+          curl -f https://dev.example.com/
+          curl -f https://dev.example.com/api/health
+
+      - name: Notify deployment
+        uses: slackapi/slack-github-action@v1
+        if: always()
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "${{ job.status == 'success' && '✅' || '❌' }} Dev deployment ${{ job.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Development Deployment*\nStatus: ${{ job.status }}\nCommit: `${{ github.sha }}`\nURL: https://dev.example.com"
+                  }
+                }
+              ]
+            }
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build, container-scan]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: staging
+      url: https://staging.example.com
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to staging
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /app
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main-${{ github.sha }}
+            docker-compose down
+            IMAGE_TAG=main-${{ github.sha }} docker-compose up -d
+
+      - name: Wait for application
+        run: sleep 30
+
+      - name: Health check
+        run: |
+          for i in {1..10}; do
+            if curl -f https://staging.example.com/health; then
+              echo "✅ Health check passed"
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying..."
+            sleep 10
+          done
+          exit 1
+
+      - name: Run integration tests
+        run: |
+          # 執行更完整的整合測試
+          pytest tests/integration/ --base-url=https://staging.example.com
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [deploy-staging]
+    environment:
+      name: production
+      url: https://app.example.com
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 保存當前版本（用於回退）
+      - name: Save current version
+        id: current
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            docker ps --format '{{.Image}}' | grep ${{ env.IMAGE_NAME }} | head -1
+
+      # 藍綠部署
+      - name: Deploy to blue environment
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /app
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main-${{ github.sha }}
+            docker-compose -f docker-compose.blue.yml down
+            IMAGE_TAG=main-${{ github.sha }} docker-compose -f docker-compose.blue.yml up -d
+
+      - name: Wait for blue environment
+        run: sleep 30
+
+      - name: Health check blue
+        id: health
+        run: |
+          for i in {1..15}; do
+            if curl -f https://blue.app.example.com/health; then
+              echo "healthy=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "healthy=false" >> $GITHUB_OUTPUT
+          exit 1
+
+      # 切換流量
+      - name: Switch traffic to blue
+        if: steps.health.outputs.healthy == 'true'
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: /app/scripts/switch-to-blue.sh
+
+      # 驗證生產環境
+      - name: Verify production
+        run: |
+          sleep 10
+          for i in {1..5}; do
+            if curl -f https://app.example.com/health; then
+              echo "✅ Production verified"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "❌ Production verification failed, triggering rollback"
+          exit 1
+
+      # 失敗時自動回退
+      - name: Rollback on failure
+        if: failure()
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "Rolling back to previous version"
+            /app/scripts/switch-to-green.sh
+            docker-compose -f docker-compose.blue.yml down
+
+      # 成功後清理
+      - name: Cleanup green environment
+        if: success()
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            sleep 300  # 等待 5 分鐘確認穩定
+            docker-compose -f docker-compose.green.yml down
+
+      # 通知
+      - name: Notify production deployment
+        uses: slackapi/slack-github-action@v1
+        if: always()
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "${{ job.status == 'success' && '🎉' || '🚨' }} Production deployment ${{ job.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Production Deployment*\nStatus: ${{ job.status }}\nCommit: `${{ github.sha }}`\nDeployed by: @${{ github.actor }}\nURL: https://app.example.com"
+                  }
+                }
+              ]
+            }
+
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Stage 5: 部署後驗證與監控
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  post-deployment-tests:
+    name: Post-Deployment Tests
+    runs-on: ubuntu-latest
+    needs: deploy-production
+    if: success()
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run smoke tests
+        run: |
+          bash scripts/smoke-test.sh https://app.example.com
+
+      - name: Run performance tests (optional)
+        run: |
+          # 使用 k6 或 Locust 執行效能測試
+          echo "Performance tests would run here"
+        continue-on-error: true
+
+      - name: Update deployment metrics
+        run: |
+          # 更新部署指標（成功率、頻率等）
+          echo "Deployment successful at $(date)" >> deployment.log
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 配置說明
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# 必要的 GitHub Secrets：
+# =======================
+# 部署相關：
+#   - DEV_HOST, DEV_USER, SSH_PRIVATE_KEY（開發環境）
+#   - STAGING_HOST, STAGING_USER（測試環境）
+#   - PROD_HOST, PROD_USER（生產環境）
+#
+# 安全掃描：
+#   - SNYK_TOKEN（Snyk API token）
+#
+# 通知：
+#   - SLACK_WEBHOOK（Slack webhook URL）
+#
+# 環境保護規則：
+# =============
+# production 環境應設定：
+#   - Required reviewers: 至少 1 人審批
+#   - Wait timer: 可選等待時間
+#   - Deployment branches: 只允許 main 分支
+#
+# 管線特色：
+# =========
+# 1. 並行執行：Stage 1 和 Stage 2 的所有 jobs 並行
+# 2. 多層安全掃描：CodeQL + Snyk + Gitleaks + Trivy
+# 3. 多環境部署：Dev → Staging → Production
+# 4. 藍綠部署：零停機時間
+# 5. 自動回退：健康檢查失敗自動回退
+# 6. 完整通知：Slack 通知部署狀態
+#
+# 執行時間估算：
+# ============
+# - Lint: 2 分鐘
+# - Test: 4 分鐘（並行）
+# - Security: 6 分鐘（並行）
+# - Build: 5 分鐘
+# - Container Scan: 2 分鐘
+# - Deploy: 每環境 2-3 分鐘
+# 總計：約 15-20 分鐘（端到端）

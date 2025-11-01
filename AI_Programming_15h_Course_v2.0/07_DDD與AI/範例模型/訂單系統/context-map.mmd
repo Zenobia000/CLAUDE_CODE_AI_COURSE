@@ -1,0 +1,138 @@
+%% 訂單系統 - 上下文地圖（Context Map）
+%% 展示訂單上下文與其他限界上下文之間的關係和集成模式
+%%
+%% DDD 上下文關係模式：
+%% - U (Upstream 上游) / D (Downstream 下游)
+%% - ACL (Anti-Corruption Layer 反腐敗層)
+%% - OHS (Open Host Service 開放主機服務)
+%% - PL (Published Language 發布語言)
+%% - SK (Shared Kernel 共享內核)
+%% - CF (Conformist 服從者)
+
+graph TB
+    %% ===================================
+    %% 核心上下文
+    %% ===================================
+
+    ORDER[<b>訂單上下文</b><br/>Order Context<br/>━━━━━━━━━━━━<br/>職責: 訂單生命週期管理<br/>聚合: Order, OrderItem<br/>團隊: 訂單團隊]
+
+    %% ===================================
+    %% 相關上下文
+    %% ===================================
+
+    USER[<b>用戶上下文</b><br/>User Context<br/>━━━━━━━━━━━━<br/>職責: 用戶身份與檔案<br/>聚合: User, Profile<br/>團隊: 用戶團隊]
+
+    PRODUCT[<b>商品上下文</b><br/>Product Context<br/>━━━━━━━━━━━━<br/>職責: 商品目錄管理<br/>聚合: Product, Category<br/>團隊: 商品團隊]
+
+    INVENTORY[<b>庫存上下文</b><br/>Inventory Context<br/>━━━━━━━━━━━━<br/>職責: 庫存管理與預留<br/>聚合: InventoryItem<br/>團隊: 倉儲團隊]
+
+    PAYMENT[<b>支付上下文</b><br/>Payment Context<br/>━━━━━━━━━━━━<br/>職責: 支付處理與退款<br/>聚合: Payment, Refund<br/>團隊: 支付團隊]
+
+    SHIPPING[<b>配送上下文</b><br/>Shipping Context<br/>━━━━━━━━━━━━<br/>職責: 物流配送管理<br/>聚合: Shipment<br/>團隊: 物流團隊]
+
+    NOTIFICATION[<b>通知上下文</b><br/>Notification Context<br/>━━━━━━━━━━━━<br/>職責: 消息通知服務<br/>聚合: Notification<br/>團隊: 平台團隊]
+
+    PROMOTION[<b>促銷上下文</b><br/>Promotion Context<br/>━━━━━━━━━━━━<br/>職責: 促銷活動管理<br/>聚合: Campaign, Coupon<br/>團隊: 營銷團隊]
+
+    REVIEW[<b>評價上下文</b><br/>Review Context<br/>━━━━━━━━━━━━<br/>職責: 商品評價管理<br/>聚合: Review<br/>團隊: 社區團隊]
+
+    %% ===================================
+    %% 上下文關係與集成模式
+    %% ===================================
+
+    %% 訂單 → 用戶 (下游 D, Conformist)
+    ORDER -->|D, CF<br/>查詢用戶信息<br/>REST API| USER
+    USER -.->|用戶數據<br/>只讀訪問| ORDER
+
+    %% 訂單 → 商品 (下游 D, ACL)
+    ORDER -->|D, ACL<br/>查詢商品信息<br/>REST API| PRODUCT
+    PRODUCT -.->|商品快照<br/>防止商品變更影響訂單| ORDER
+
+    %% 訂單 ↔ 庫存 (客戶-供應商)
+    ORDER -->|U/D<br/>預留/釋放庫存<br/>Domain Events| INVENTORY
+    INVENTORY -.->|庫存預留成功<br/>InventoryReserved| ORDER
+    INVENTORY -.->|庫存不足<br/>InsufficientStock| ORDER
+
+    %% 訂單 → 支付 (上游 U, OHS/PL)
+    ORDER -->|U, OHS/PL<br/>發起支付請求<br/>REST API| PAYMENT
+    PAYMENT -.->|支付狀態回調<br/>PaymentCompleted/Failed| ORDER
+
+    %% 訂單 → 配送 (上游 U, OHS)
+    ORDER -->|U, OHS<br/>創建配送任務<br/>Domain Events| SHIPPING
+    SHIPPING -.->|配送狀態更新<br/>ShipmentDispatched| ORDER
+
+    %% 訂單 → 通知 (獨立服務)
+    ORDER -.->|發布事件<br/>OrderCreated, OrderPaid, etc.<br/>Message Queue| NOTIFICATION
+    NOTIFICATION -.->|發送通知<br/>Email, SMS, Push| ORDER
+
+    %% 訂單 → 促銷 (下游 D, ACL)
+    ORDER -->|D, ACL<br/>應用優惠券/折扣<br/>REST API| PROMOTION
+    PROMOTION -.->|折扣計算結果| ORDER
+
+    %% 訂單 → 評價 (上游 U)
+    ORDER -.->|訂單完成事件<br/>OrderCompleted<br/>Message Queue| REVIEW
+    REVIEW -.->|觸發評價提醒| ORDER
+
+    %% ===================================
+    %% 集成模式說明
+    %% ===================================
+
+    subgraph LEGEND[圖例說明]
+        direction TB
+        L1[實線箭頭: 同步調用 REST API]
+        L2[虛線箭頭: 異步通信 Message Queue]
+        L3[U: Upstream 上游 訂單依賴該服務]
+        L4[D: Downstream 下游 訂單是數據消費者]
+        L5[ACL: Anti-Corruption Layer 反腐敗層]
+        L6[OHS: Open Host Service 開放主機服務]
+        L7[PL: Published Language 發布語言]
+        L8[CF: Conformist 服從者]
+    end
+
+    %% ===================================
+    %% 關鍵集成點詳細說明
+    %% ===================================
+
+    subgraph INTEGRATION[關鍵集成點]
+        direction TB
+
+        INT1[<b>1. 庫存預留</b><br/>訂單創建時同步調用庫存服務<br/>預留庫存,防止超賣<br/>採用補償事務處理失敗]
+
+        INT2[<b>2. 支付處理</b><br/>訂單支付通過支付網關<br/>支付成功後異步回調<br/>冪等性處理重複通知]
+
+        INT3[<b>3. 配送觸發</b><br/>訂單支付成功後發布事件<br/>配送服務監聽並創建配送單<br/>解耦訂單與配送邏輯]
+
+        INT4[<b>4. 通知發送</b><br/>訂單狀態變更發布事件<br/>通知服務統一處理消息<br/>支持多渠道通知 Email/SMS/Push]
+
+        INT5[<b>5. 商品快照</b><br/>訂單創建時保存商品信息快照<br/>避免商品變更影響歷史訂單<br/>使用 ACL 隔離商品上下文變更]
+    end
+
+    %% ===================================
+    %% 樣式定義
+    %% ===================================
+
+    %% 訂單上下文（核心域）- 綠色
+    classDef coreContext fill:#2ecc71,stroke:#27ae60,stroke-width:4px,color:#fff,font-weight:bold
+
+    %% 支撐上下文 - 藍色
+    classDef supportContext fill:#3498db,stroke:#2980b9,stroke-width:3px,color:#fff
+
+    %% 通用上下文 - 灰色
+    classDef genericContext fill:#95a5a6,stroke:#7f8c8d,stroke-width:2px,color:#fff
+
+    %% 外部服務 - 橙色
+    classDef externalContext fill:#e67e22,stroke:#d35400,stroke-width:2px,color:#fff
+
+    %% 圖例 - 淺色
+    classDef legendStyle fill:#ecf0f1,stroke:#bdc3c7,stroke-width:1px,color:#2c3e50
+
+    %% 集成點 - 黃色
+    classDef integrationStyle fill:#f39c12,stroke:#e67e22,stroke-width:2px,color:#fff
+
+    %% 應用樣式
+    class ORDER coreContext
+    class USER,PRODUCT,INVENTORY supportContext
+    class NOTIFICATION,REVIEW genericContext
+    class PAYMENT,SHIPPING externalContext
+    class LEGEND legendStyle
+    class INT1,INT2,INT3,INT4,INT5 integrationStyle

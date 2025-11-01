@@ -1,0 +1,165 @@
+%% 訂單系統 - 事件風暴圖（Event Storming）
+%% 使用 Mermaid Flowchart 表示事件風暴過程
+%%
+%% 圖例：
+%% - 命令（Command）：藍色矩形 [CreateOrder]
+%% - 領域事件（Domain Event）：橙色圓角矩形 ((OrderCreated))
+%% - 聚合（Aggregate）：綠色六邊形 {{Order}}
+%% - 外部系統/上下文（External）：灰色矩形 [Inventory]
+%% - 業務規則（Policy）：黃色菱形 {Check Stock}
+%%
+%% 本圖展示訂單系統的完整事件流，從訂單創建到訂單完成的所有路徑
+
+graph TB
+    %% ===================================
+    %% 主流程：正常訂單流程（綠色路徑）
+    %% ===================================
+
+    Start([客戶瀏覽商品]) --> CMD1[CreateOrder<br/>創建訂單]
+
+    CMD1 --> POL1{驗證庫存<br/>& 商品狀態}
+    POL1 -->|庫存充足| AGG1{{Order<br/>訂單聚合}}
+    POL1 -->|庫存不足| ERR1[拋出異常:<br/>庫存不足]
+
+    AGG1 --> EVT1((OrderCreated<br/>訂單已創建))
+
+    EVT1 --> EXT1[Inventory Context<br/>預留庫存]
+    EVT1 --> EXT2[Notification Context<br/>發送訂單通知]
+    EVT1 --> WAIT1[等待客戶支付<br/>狀態: PENDING]
+
+    %% 支付流程
+    WAIT1 --> POL2{30分鐘內<br/>支付?}
+    POL2 -->|是| CMD2[PayOrder<br/>支付訂單]
+    POL2 -->|否| CMD3[Auto-Cancel<br/>自動取消]
+
+    CMD2 --> EXT3[Payment Context<br/>處理支付]
+    EXT3 --> POL3{支付成功?}
+
+    POL3 -->|成功| AGG2{{Order}}
+    POL3 -->|失敗| WAIT1
+
+    AGG2 --> EVT2((OrderPaid<br/>訂單已支付))
+
+    EVT2 --> EXT4[Inventory Context<br/>確認扣減庫存]
+    EVT2 --> EXT5[Shipping Context<br/>創建配送任務]
+    EVT2 --> EXT6[Notification Context<br/>發送支付成功通知]
+
+    %% 發貨流程
+    EXT5 --> WAIT2[等待倉庫發貨<br/>狀態: PAID]
+    WAIT2 --> CMD4[ShipOrder<br/>發貨訂單]
+
+    CMD4 --> AGG3{{Order}}
+    AGG3 --> EVT3((OrderShipped<br/>訂單已發貨))
+
+    EVT3 --> EXT7[Notification Context<br/>發送發貨通知]
+    EVT3 --> EXT8[Shipping Context<br/>更新物流信息]
+
+    %% 配送流程
+    EXT8 --> WAIT3[物流配送中<br/>狀態: SHIPPED]
+    WAIT3 --> EVT4((OrderDelivered<br/>訂單已送達))
+
+    EVT4 --> EXT9[Notification Context<br/>提醒客戶確認收貨]
+    EVT4 --> WAIT4[等待確認收貨<br/>狀態: DELIVERED]
+
+    %% 完成流程
+    WAIT4 --> POL4{7天內<br/>確認收貨?}
+    POL4 -->|客戶主動確認| CMD5[CompleteOrder<br/>完成訂單]
+    POL4 -->|超時自動確認| CMD6[Auto-Complete<br/>自動完成]
+
+    CMD5 --> AGG4{{Order}}
+    CMD6 --> AGG4
+
+    AGG4 --> EVT5((OrderCompleted<br/>訂單已完成))
+
+    EVT5 --> EXT10[User Context<br/>增加積分]
+    EVT5 --> EXT11[Review Context<br/>觸發評價提醒]
+    EVT5 --> END1([訂單交易結束])
+
+    %% ===================================
+    %% 異常流程1：訂單取消（紅色路徑）
+    %% ===================================
+
+    WAIT1 --> CMD7[CancelOrder<br/>取消訂單<br/>原因: 客戶主動]
+    CMD3 --> AGG5{{Order}}
+    CMD7 --> AGG5
+
+    AGG5 --> EVT6((OrderCancelled<br/>訂單已取消))
+
+    EVT6 --> EXT12[Inventory Context<br/>釋放預留庫存]
+    EVT6 --> EXT13[Notification Context<br/>發送取消通知]
+    EVT6 --> END2([訂單已取消])
+
+    %% ===================================
+    %% 異常流程2：支付後取消/退款（黃色路徑）
+    %% ===================================
+
+    WAIT2 --> POL5{發貨前<br/>客戶申請取消?}
+    POL5 -->|是| CMD8[CancelOrder<br/>取消訂單<br/>原因: 客戶申請]
+
+    CMD8 --> AGG6{{Order}}
+    AGG6 --> EVT7((OrderCancelled<br/>訂單已取消))
+
+    EVT7 --> EXT14[Payment Context<br/>觸發退款]
+    EVT7 --> EXT15[Inventory Context<br/>釋放庫存]
+    EVT7 --> EVT8((PaymentRefunded<br/>退款完成))
+    EVT8 --> END3([訂單已退款])
+
+    %% ===================================
+    %% 異常流程3：發貨後退貨（紫色路徑）
+    %% ===================================
+
+    WAIT4 --> POL6{客戶申請<br/>退貨?}
+    POL6 -->|是| CMD9[RequestRefund<br/>申請退款]
+
+    CMD9 --> POL7{審核通過?}
+    POL7 -->|通過| CMD10[ProcessRefund<br/>處理退款]
+    POL7 -->|拒絕| WAIT4
+
+    CMD10 --> AGG7{{Order}}
+    AGG7 --> EVT9((RefundRequested<br/>退款申請已提交))
+
+    EVT9 --> EXT16[Shipping Context<br/>安排退貨物流]
+    EXT16 --> EVT10((ReturnReceived<br/>退貨已收到))
+
+    EVT10 --> AGG8{{Order}}
+    AGG8 --> EVT11((OrderRefunded<br/>訂單已退款))
+
+    EVT11 --> EXT17[Payment Context<br/>執行退款]
+    EVT11 --> EXT18[Inventory Context<br/>入庫退貨商品]
+    EVT11 --> END4([訂單已退款])
+
+    %% ===================================
+    %% 樣式定義
+    %% ===================================
+
+    %% 命令樣式（藍色）
+    classDef commandStyle fill:#3498db,stroke:#2980b9,stroke-width:2px,color:#fff
+    class CMD1,CMD2,CMD3,CMD4,CMD5,CMD6,CMD7,CMD8,CMD9,CMD10 commandStyle
+
+    %% 事件樣式（橙色）
+    classDef eventStyle fill:#e67e22,stroke:#d35400,stroke-width:2px,color:#fff
+    class EVT1,EVT2,EVT3,EVT4,EVT5,EVT6,EVT7,EVT8,EVT9,EVT10,EVT11 eventStyle
+
+    %% 聚合樣式（綠色）
+    classDef aggregateStyle fill:#2ecc71,stroke:#27ae60,stroke-width:3px,color:#fff
+    class AGG1,AGG2,AGG3,AGG4,AGG5,AGG6,AGG7,AGG8 aggregateStyle
+
+    %% 外部系統樣式（灰色）
+    classDef externalStyle fill:#95a5a6,stroke:#7f8c8d,stroke-width:2px,color:#fff
+    class EXT1,EXT2,EXT3,EXT4,EXT5,EXT6,EXT7,EXT8,EXT9,EXT10,EXT11,EXT12,EXT13,EXT14,EXT15,EXT16,EXT17,EXT18 externalStyle
+
+    %% 業務規則樣式（黃色）
+    classDef policyStyle fill:#f39c12,stroke:#e67e22,stroke-width:2px,color:#fff
+    class POL1,POL2,POL3,POL4,POL5,POL6,POL7 policyStyle
+
+    %% 等待狀態樣式（淺藍）
+    classDef waitStyle fill:#ecf0f1,stroke:#bdc3c7,stroke-width:2px,color:#34495e
+    class WAIT1,WAIT2,WAIT3,WAIT4 waitStyle
+
+    %% 錯誤樣式（紅色）
+    classDef errorStyle fill:#e74c3c,stroke:#c0392b,stroke-width:2px,color:#fff
+    class ERR1 errorStyle
+
+    %% 結束樣式（深綠）
+    classDef endStyle fill:#16a085,stroke:#138d75,stroke-width:3px,color:#fff
+    class END1,END2,END3,END4 endStyle

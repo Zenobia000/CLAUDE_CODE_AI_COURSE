@@ -1,0 +1,204 @@
+name: CI - FastAPI 專案
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # 允許手動觸發
+
+# 設定權限（推送 Docker 映像到 GHCR 需要）
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 1: 程式碼品質檢查（Linting）
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  lint:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'  # 啟用 pip 快取
+
+      - name: Install linting tools
+        run: |
+          pip install black flake8 isort
+
+      - name: Run black (code formatting check)
+        run: |
+          black --check app tests
+
+      - name: Run flake8 (style check)
+        run: |
+          flake8 app tests --max-line-length=100 --extend-ignore=E203,W503
+
+      - name: Run isort (import sorting check)
+        run: |
+          isort --check app tests
+
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 2: 自動化測試
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run pytest with coverage
+        run: |
+          pytest --cov=app \
+                 --cov-report=xml \
+                 --cov-report=term \
+                 --cov-report=html
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false  # Codecov 失敗不影響 CI
+          verbose: true
+
+      - name: Upload coverage HTML report as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-report
+          path: htmlcov/
+
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 3: 安全掃描
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install safety
+        run: |
+          pip install safety
+
+      - name: Run safety check (dependency vulnerability scan)
+        run: |
+          safety check --file requirements.txt --output text
+        continue-on-error: true  # 暫時允許繼續（生產環境應設為 false）
+
+      - name: Run Bandit (Python security linter)
+        run: |
+          pip install bandit
+          bandit -r app -f json -o bandit-report.json
+        continue-on-error: true
+
+      - name: Upload Bandit report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: bandit-security-report
+          path: bandit-report.json
+
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 4: Docker 構建與推送
+  # （依賴前三個 jobs 全部通過）
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  build:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    needs: [lint, test, security]  # 等待前三個 jobs 通過
+    if: github.event_name != 'pull_request'  # PR 不推送映像
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,prefix={{branch}}-
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./fastapi_project
+          file: ./fastapi_project/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha  # 使用 GitHub Actions cache
+          cache-to: type=gha,mode=max
+
+      - name: Image digest
+        run: echo "Image pushed with digest: ${{ steps.docker_build.outputs.digest }}"
+
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 5: 總結報告（可選）
+  #━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [lint, test, security, build]
+    if: always()  # 總是執行，即使前面有失敗
+
+    steps:
+      - name: Check CI Results
+        run: |
+          echo "## CI Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Lint**: ${{ needs.lint.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Test**: ${{ needs.test.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Security**: ${{ needs.security.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build**: ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Report failure
+        if: |
+          needs.lint.result == 'failure' ||
+          needs.test.result == 'failure' ||
+          needs.security.result == 'failure' ||
+          needs.build.result == 'failure'
+        run: |
+          echo "❌ CI pipeline failed. Please check the logs above."
+          exit 1

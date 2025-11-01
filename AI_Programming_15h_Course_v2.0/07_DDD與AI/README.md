@@ -71,8 +71,11 @@
 │       ├── event-storming.mmd
 │       ├── context-map.mmd
 │       └── domain-model.py
-├── 記憶卡庫/
-│   └── README.md（50+ 張記憶卡架構）
+├── 模板/
+│   ├── 通用語言詞彙表模板.md
+│   ├── 事件風暴模板.md
+│   ├── 上下文地圖模板.md
+│   └── 領域模型設計模板.md
 └── 作業/
     └── 作業說明.md
 ```
