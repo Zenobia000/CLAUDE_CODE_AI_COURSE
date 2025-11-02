@@ -1,0 +1,70 @@
+[tool.poetry]
+name = "task-management-api"
+version = "1.0.0"
+description = "Task Management System API - 情境驅動學習實戰專案"
+authors = ["Your Name <your.email@example.com>"]
+readme = "README.md"
+packages = [{include = "app", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+fastapi = "^0.104.0"
+uvicorn = {extras = ["standard"], version = "^0.24.0"}
+sqlalchemy = "^2.0.0"
+psycopg2-binary = "^2.9.9"
+pydantic = {extras = ["email"], version = "^2.5.0"}
+pydantic-settings = "^2.1.0"
+alembic = "^1.13.0"
+
+# 以下依賴需要在階段 2 開發時添加
+# 認證相關
+# pyjwt = "^2.8.0"
+# passlib = {extras = ["bcrypt"], version = "^1.7.4"}
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-cov = "^4.1.0"
+pytest-asyncio = "^0.21.0"
+black = "^23.12.0"
+ruff = "^0.1.0"
+httpx = "^0.25.0"
+
+# 安全掃描工具（階段 4 使用）
+# bandit = "^1.7.5"
+# safety = "^2.3.5"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+addopts = "-v --cov=app --cov-report=term-missing"
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # 默認排除
+  \.eggs
+  | \.git
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I", "N"]
+ignore = ["E501"]  # 行長度由 black 處理
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "alembic/versions",
+]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
